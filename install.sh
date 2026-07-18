@@ -12,8 +12,9 @@ INSTALL_CACHYOS_KERNEL=false
 ASK_CACHYOS=true
 INSTALL_HYPRLAND=""
 AUTO_REBOOT=false
-INSTALL_ALL_USER_APPS=false      # <-- new
-DO_BTRFS_SETUP=""                # <-- new (true/false/empty = prompt)
+INSTALL_ALL_USER_APPS=false
+DO_BTRFS_SETUP=""
+INSTALL_SDDM=""
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -22,16 +23,19 @@ while [[ "$#" -gt 0 ]]; do
         --no-cachyos) INSTALL_CACHYOS_KERNEL=false; ASK_CACHYOS=false ;;
         --hyprland) INSTALL_HYPRLAND=true ;;
         --no-hyprland) INSTALL_HYPRLAND=false ;;
-        --all-apps) INSTALL_ALL_USER_APPS=true ;;                 # new
-        --btrfs-setup) DO_BTRFS_SETUP=true ;;                    # new
-        --no-btrfs-setup) DO_BTRFS_SETUP=false ;;                # new
+        --all-apps) INSTALL_ALL_USER_APPS=true ;;
+        --btrfs-setup) DO_BTRFS_SETUP=true ;;
+        --no-btrfs-setup) DO_BTRFS_SETUP=false ;;
+        --sddm) INSTALL_SDDM=true ;;
+        --no-sddm) INSTALL_SDDM=false ;;
         --all)
             INSTALL_ALL_USER_PKGS=true
             INSTALL_CACHYOS_KERNEL=true
             ASK_CACHYOS=false
             INSTALL_HYPRLAND=true
-            INSTALL_ALL_USER_APPS=true                           # new
-            DO_BTRFS_SETUP=true                                  # new
+            INSTALL_ALL_USER_APPS=true
+            DO_BTRFS_SETUP=true
+            INSTALL_SDDM=true
             ;;
         --reboot) AUTO_REBOOT=true ;;
         -h|--help)
@@ -45,6 +49,8 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --all-apps     Automatically install all recommended Step 6 applications"
             echo "  --btrfs-setup  Automatically perform Btrfs snapshot & grub‑btrfs setup"
             echo "  --no-btrfs-setup  Skip Btrfs setup (manual grub update required later)"
+            echo "  --sddm         Install SDDM display manager"
+            echo "  --no-sddm      Skip SDDM installation (manual start with start-kineticwe)"
             echo "  --all          Install all optional packages and features"
             echo "  --reboot       Automatically reboot at the end"
             exit 0
@@ -102,8 +108,10 @@ grep -q '^max_parallel_downloads=10' /etc/dnf/dnf.conf || echo 'max_parallel_dow
 grep -q '^defaultyes=True' /etc/dnf/dnf.conf || echo 'defaultyes=True' >> /etc/dnf/dnf.conf
 grep -q '^keepcache=True' /etc/dnf/dnf.conf || echo 'keepcache=True' >> /etc/dnf/dnf.conf
 
-# Enable COPR repositories (Hyprland COPR will be enabled later if needed)
+# Enable COPR repositories
 dnf copr enable -y theblackdon/kineticwe || handle_error "Enabling kineticwe COPR"
+# lionheartp/Hyprland COPR is required by noctalia – enable it unconditionally
+dnf copr enable -y lionheartp/Hyprland || handle_error "Enabling Hyprland COPR (required by noctalia)"
 
 # --- lgl-system-loadout optional ---
 INSTALL_LGL=false
@@ -131,13 +139,11 @@ fi
 
 dnf install -y --skip-broken $CORE_PACKAGES || handle_error "Installing Desktop Environment and Core Packages"
 
-# Hyprland question (if not already set by flag) – moved just before installation
+# Hyprland (optional compositor) – COPR already enabled above
 if [ -z "$INSTALL_HYPRLAND" ]; then
     read -p "Install Hyprland (Wayland compositor)? (y/N): " choice_hypr
     if [[ "$choice_hypr" =~ ^[Yy]$ ]]; then
         INSTALL_HYPRLAND=true
-        # Enable Hyprland COPR only when user opts in
-        dnf copr enable -y lionheartp/Hyprland || handle_error "Enabling Hyprland COPR"
     else
         INSTALL_HYPRLAND=false
     fi
@@ -148,10 +154,25 @@ if [ "$INSTALL_HYPRLAND" = true ]; then
     dnf install -y hyprland || handle_error "Installing Hyprland"
 fi
 
-# SDDM is installed regardless
-dnf install -y sddm || handle_error "Installing SDDM"
-systemctl set-default graphical.target || handle_error "Setting default target to graphical"
-systemctl enable --force sddm.service || handle_error "Enabling SDDM Display Manager"
+# SDDM (display manager) – made optional
+if [ -z "$INSTALL_SDDM" ]; then
+    read -p "Install SDDM display manager? (Y/n): " choice_sddm
+    if [[ "$choice_sddm" =~ ^[Nn]$ ]]; then
+        INSTALL_SDDM=false
+    else
+        INSTALL_SDDM=true
+    fi
+fi
+
+if [ "$INSTALL_SDDM" = true ]; then
+    echo "Installing SDDM..."
+    dnf install -y sddm || handle_error "Installing SDDM"
+    systemctl set-default graphical.target || handle_error "Setting default target to graphical"
+    systemctl enable --force sddm.service || handle_error "Enabling SDDM Display Manager"
+else
+    echo "Skipping SDDM installation."
+    echo "You can start the Kineticwe desktop manually after login with: start-kineticwe"
+fi
 
 ## Step 3 — Hardware Drivers, Codecs & Media
 echo -e "\n---> Step 3: Hardware Drivers, Codecs & Media"
@@ -517,11 +538,19 @@ echo ""
 fi
 
 echo ""
-echo " 2. Log in via SDDM allows:"
-if [ "$INSTALL_HYPRLAND" = true ]; then
-    echo "    - Choose Hyprland (Wayland) or Kineticwe (KDE) sessions."
+if [ "$INSTALL_SDDM" = true ]; then
+    echo " 2. SDDM is installed and enabled. To log in via SDDM:"
+    if [ "$INSTALL_HYPRLAND" = true ]; then
+        echo "    - Choose Hyprland (Wayland) or Kineticwe (KDE) session."
+    else
+        echo "    - Choose Kineticwe (KDE) session."
+    fi
 else
-    echo "    - Hyprland not installed; only Kineticwe (KDE) is available."
+    echo " 2. SDDM was NOT installed. To start desktop from TTY:"
+    echo "    - After logging in, run: start-kineticwe"
+    if [ "$INSTALL_HYPRLAND" = true ]; then
+    echo "    - For Hyprland, run: start-hyprland"
+    fi
 fi
 echo "    - For Noctalia, enable Polkit in Security settings."
 echo ""

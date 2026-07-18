@@ -86,7 +86,7 @@ User Applications and repos if not added before
 - wehagy/protonplus
 - ilyaz/LACT
 - lihaohong/yazi
-- Installs steam mangohud gamescope protonplus qbittorrent mpv dolphin protontricks goverlay kde-partitionmanager fastfetch brave-origin-nightly rsync duf btop lact plasma-discover loupe gnome-calculator yazi tldr htop distrobox podman ZED editor
+- Installs steam mangohud gamescope protontricks protonplus goverlay loupe gnome-calculator ZED editor yazi qbittorrent brave-origin-nightly mpv dolphin plasma-discover kde-partitionmanager fastfetch zsh rsync duf btop lact tldr htop distrobox podman
 
 ---
 Btrfs Snapshots, Compression & System Recovery Setup from

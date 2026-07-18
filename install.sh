@@ -250,7 +250,7 @@ else
   echo "Brave repository is already added."
 fi
 
-PACKAGES=(steam mangohud gamescope protontricks protonplus goverlay lact mpv loupe gnome-calculator qbittorrent brave-origin-nightly dolphin plasma-discover kde-partitionmanager ZED editor yazi fastfetch zsh rsync duf btop tldr htop distrobox podman)
+PACKAGES=(steam mangohud gamescope protontricks protonplus goverlay lact mpv loupe gnome-calculator qbittorrent brave-origin-nightly dolphin kde-partitionmanager flatpak yazi fastfetch zsh rsync duf btop tldr htop distrobox podman)
 
 if [ "$INSTALL_ALL_USER_APPS" = true ]; then
     echo "[INFO] --all-apps used: installing all user applications without prompts."
@@ -300,6 +300,24 @@ su - "$TARGET_USER" -c "command -v zed &>/dev/null || [ -f ~/.local/bin/zed ]" |
 # Firefox removal if Brave installed
 if is_installed_dnf "brave-origin-nightly" || is_installed_dnf "brave-origin"; then
   is_installed_dnf "firefox" && read -p "Remove Firefox? [y/N]: " c && [[ "$c" =~ ^[Yy]$ ]] && dnf remove -y firefox
+fi
+
+# ============================
+# Bazaar Flatpak installation
+# ============================
+if command -v flatpak &>/dev/null; then
+    flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo &>/dev/null || true
+    if [ "$INSTALL_ALL_APPS" = true ]; then
+        echo "Installing Bazaar (GUI package manager) from Flathub..."
+        flatpak install -y flathub io.github.kolunmi.Bazaar || echo "[FAIL] Bazaar"
+    else
+        read -p "Install Bazaar (Flathub) GUI package manager? [y/N]: " c
+        if [[ "$c" =~ ^[Yy]$ ]]; then
+            flatpak install -y flathub io.github.kolunmi.Bazaar || echo "[FAIL] Bazaar"
+        fi
+    fi
+else
+    echo "[INFO] Flatpak not installed – skipping Bazaar installation."
 fi
 
 # =================================================================

@@ -16,7 +16,8 @@ INSTALL_SDDM=""
 INSTALL_FIREWALLD=""
 INSTALL_DNF_OPTIMIZE=""
 INSTALL_GRAPHICS_DRIVERS=""
-INSTALL_FFMPEG_FULL=""
+INSTALL_FFMPEG_LIBS=""
+INSTALL_DNS_TWEAKS=""
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -25,8 +26,10 @@ while [[ "$#" -gt 0 ]]; do
         --no-cachyos) INSTALL_CACHYOS_KERNEL=false; ASK_CACHYOS=false ;;
         --sddm) INSTALL_SDDM=true ;;
         --no-sddm) INSTALL_SDDM=false ;;
-        --ffmpeg-full) INSTALL_FFMPEG_FULL=true ;;
-        --no-ffmpeg-full) INSTALL_FFMPEG_FULL=false ;;
+        --ffmpeg-libs) INSTALL_FFMPEG_LIBS=true ;;
+        --no-ffmpeg-libs) INSTALL_FFMPEG_LIBS=false ;;
+        --dns-tweaks) INSTALL_DNS_TWEAKS=true ;;
+        --no-dns-tweaks) INSTALL_DNS_TWEAKS=false ;;
         --all)
             INSTALL_ALL_USER_PKGS=true
             INSTALL_CACHYOS_KERNEL=true
@@ -35,21 +38,24 @@ while [[ "$#" -gt 0 ]]; do
             INSTALL_FIREWALLD=true
             INSTALL_DNF_OPTIMIZE=true
             INSTALL_GRAPHICS_DRIVERS=true
-            INSTALL_FFMPEG_FULL=true
+            INSTALL_FFMPEG_LIBS=true
+            INSTALL_DNS_TWEAKS=true
             ;;
         --reboot) AUTO_REBOOT=true ;;
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo "Options:"
-            echo "  --user-pkgs    Automatically install optional user packages (Docker, KVM)"
-            echo "  --cachyos      Automatically install CachyOS Kernel & Schedulers"
-            echo "  --no-cachyos   Skip CachyOS Kernel installation"
-            echo "  --sddm         Install SDDM display manager"
-            echo "  --no-sddm      Skip SDDM installation (manual start with start-kineticwe)"
-            echo "  --ffmpeg-full  Replace ffmpeg-free with full ffmpeg"
-            echo "  --no-ffmpeg-full Skip ffmpeg replacement"
-            echo "  --all          Install all optional packages and features"
-            echo "  --reboot       Automatically reboot at the end"
+            echo "  --user-pkgs       Automatically install optional user packages (Docker, KVM)"
+            echo "  --cachyos         Automatically install CachyOS Kernel & Schedulers"
+            echo "  --no-cachyos      Skip CachyOS Kernel installation"
+            echo "  --sddm            Install SDDM display manager"
+            echo "  --no-sddm         Skip SDDM installation (manual start with start-kineticwe)"
+            echo "  --ffmpeg-libs     Install ffmpeg-libs, libva, libva-utils"
+            echo "  --no-ffmpeg-libs  Skip ffmpeg-libs installation"
+            echo "  --dns-tweaks      Set up DNS over TLS & disable NM wait-online"
+            echo "  --no-dns-tweaks   Skip DNS tweaks"
+            echo "  --all             Install all optional packages and features"
+            echo "  --reboot          Automatically reboot at the end"
             exit 0
             ;;
         *) echo "Unknown parameter: $1"; exit 1 ;;
@@ -83,8 +89,8 @@ echo "  kineticwe, noctalia, AMD, CachyOS, Gaming"
 echo "  Target User: $TARGET_USER ($TARGET_HOME)"
 echo "==================================================="
 
-## Step 1 — Optimising DNF & Enabling Repositories
-echo -e "\n---> Step 1: Optimising DNF & Enabling Repositories"
+## Step 1 — DNF Optimisations & Network Tweaks
+echo -e "\n---> Step 1: DNF Optimisations & Network Tweaks"
 
 # DNF optimisations optional
 if [ -z "$INSTALL_DNF_OPTIMIZE" ]; then
@@ -105,7 +111,34 @@ else
     echo "[SKIP] DNF optimizations not applied."
 fi
 
+# DNS over TLS & disable NetworkManager-wait-online (optional)
+if [ -z "$INSTALL_DNS_TWEAKS" ]; then
+    read -p "Configure DNS over TLS (Cloudflare security) and disable NetworkManager-wait-online? (y/N): " choice_dns
+    if [[ "$choice_dns" =~ ^[Yy]$ ]]; then
+        INSTALL_DNS_TWEAKS=true
+    else
+        INSTALL_DNS_TWEAKS=false
+    fi
+fi
+
+if [ "$INSTALL_DNS_TWEAKS" = true ]; then
+    echo "Setting up DNS over TLS..."
+    mkdir -p /etc/systemd/resolved.conf.d
+    cat > /etc/systemd/resolved.conf.d/99-dns-over-tls.conf << 'DNSCONF'
+[Resolve]
+DNS=1.1.1.2#security.cloudflare-dns.com 1.0.0.2#security.cloudflare-dns.com 2606:4700:4700::1112#security.cloudflare-dns.com 2606:4700:4700::1002#security.cloudflare-dns.com
+DNSOverTLS=yes
+Domains=~.
+DNSCONF
+    systemctl restart systemd-resolved || handle_error "Restarting systemd-resolved"
+    echo "Disabling NetworkManager-wait-online.service..."
+    systemctl disable NetworkManager-wait-online.service || echo "[WARNING] Could not disable NetworkManager-wait-online"
+else
+    echo "[SKIP] DNS tweaks not applied."
+fi
+
 # Enable COPR repositories
+echo -e "\n---> Step 1b: Enabling Repositories"
 dnf copr enable -y theblackdon/kineticwe || handle_error "Enabling kineticwe COPR"
 dnf copr enable -y lionheartp/Hyprland || handle_error "Enabling Hyprland COPR (required by noctalia)"
 
@@ -128,7 +161,7 @@ dnf config-manager setopt rpmfusion-free-updates.enabled=1 || handle_error "Sett
 ## Step 2 — Desktop Environment & Core Packages
 echo -e "\n---> Step 2: Desktop Environment & Core Packages"
 
-CORE_PACKAGES="dnf-plugins-core kineticwe noctalia-git"
+CORE_PACKAGES="dnf-plugins-core kineticwe noctalia"
 if [ "$INSTALL_LGL" = true ]; then
     CORE_PACKAGES="$CORE_PACKAGES lgl-system-loadout"
 fi
@@ -158,20 +191,20 @@ fi
 ## Step 3 — Hardware Drivers, Codecs & Media
 echo -e "\n---> Step 3: Hardware Drivers, Codecs & Media"
 
-# Full FFmpeg swap – optional
-if [ -z "$INSTALL_FFMPEG_FULL" ]; then
-    read -p "Replace ffmpeg-free with full ffmpeg? (Y/n): " choice_ffmpeg
+# ffmpeg-libs and VA-API libraries (optional)
+if [ -z "$INSTALL_FFMPEG_LIBS" ]; then
+    read -p "Install multimedia codecs (ffmpeg-libs, libva, libva-utils)? (Y/n): " choice_ffmpeg
     if [[ "$choice_ffmpeg" =~ ^[Nn]$ ]]; then
-        INSTALL_FFMPEG_FULL=false
+        INSTALL_FFMPEG_LIBS=false
     else
-        INSTALL_FFMPEG_FULL=true
+        INSTALL_FFMPEG_LIBS=true
     fi
 fi
 
-if [ "$INSTALL_FFMPEG_FULL" = true ]; then
-    dnf swap -y ffmpeg-free ffmpeg --allowerasing || handle_error "Swapping to full FFmpeg"
+if [ "$INSTALL_FFMPEG_LIBS" = true ]; then
+    dnf install -y ffmpeg-libs libva libva-utils || handle_error "Installing ffmpeg-libs and VA-API libs"
 else
-    echo "[SKIP] Keeping current ffmpeg version."
+    echo "[SKIP] ffmpeg-libs not installed."
 fi
 
 dnf upgrade --refresh -y || handle_error "System Upgrade"
@@ -191,11 +224,12 @@ if [ "$INSTALL_GRAPHICS_DRIVERS" = true ]; then
     echo "Installing graphics drivers..."
 
     # Install freeworld drivers, replacing stock if present
-    dnf install -y mesa-va-drivers-freeworld mesa-vdpau-drivers-freeworld --allowerasing \
+    dnf install -y mesa-va-drivers-freeworld --allowerasing \
         || handle_error "Installing freeworld mesa drivers"
 
     # Install remaining graphics components
     dnf install -y --skip-broken mesa-dri-drivers vulkan-loader vulkan-tools || handle_error "Graphics"
+    # libva-utils might already be installed, but ensure it's there
     dnf install -y libva-utils || handle_error "Installing libva-utils"
 
     if ! grep -q "LIBVA_DRIVER_NAME=radeonsi" "$TARGET_HOME/.bashrc"; then
@@ -662,6 +696,10 @@ if findmnt -n -o FSTYPE / | grep -q btrfs; then
         echo "    - Update GRUB with:"
         echo "      sudo grub2-mkconfig -o /boot/grub2/grub.cfg"
     fi
+fi
+if [ "$INSTALL_DNS_TWEAKS" = true ]; then
+    echo ""
+    echo " 4. DNS over TLS configured – check /etc/systemd/resolved.conf.d/99-dns-over-tls.conf"
 fi
 echo "==================================================="
 
